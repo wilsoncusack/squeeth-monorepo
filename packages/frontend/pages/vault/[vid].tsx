@@ -1,5 +1,5 @@
 import { useQuery } from '@apollo/client'
-import { CircularProgress, InputAdornment, TextField, Typography, Tooltip } from '@material-ui/core'
+import { CircularProgress, InputAdornment, TextField, Typography, Tooltip, Input } from '@material-ui/core'
 import { orange } from '@material-ui/core/colors'
 import { createStyles, makeStyles } from '@material-ui/core/styles'
 import AccessTimeIcon from '@material-ui/icons/AccessTime'
@@ -33,6 +33,7 @@ import { CollateralStatus, Vault } from '../../src/types'
 import { squeethClient } from '@utils/apollo-client'
 import { getCollatPercentStatus, toTokenAmount } from '@utils/calculations'
 import { LinkButton } from '@components/Button'
+import { useERC721 } from '@hooks/contracts/useERC721'
 
 const useStyles = makeStyles((theme) =>
   createStyles({
@@ -204,6 +205,9 @@ enum VaultAction {
   REMOVE_COLLATERAL,
   MINT_SQUEETH,
   BURN_SQUEETH,
+  APPROVE_UNI_POSITION,
+  DEPOSIT_UNI_POSITION,
+  WITHDRAW_UNI_POSITION,
 }
 
 enum VaultError {
@@ -226,12 +230,16 @@ const Component: React.FC = () => {
     openDepositAndMint,
     burnAndRedeem,
     getTwapEthPrice,
+    depositUniPositionToken,
+    withdrawUniPositionToken,
+    getVault,
   } = useController()
-  const { wSqueeth } = useAddresses()
+  const { wSqueeth, nftManager, controller } = useAddresses()
   const { balance, address, connected, networkId } = useWallet()
   const { vid } = router.query
   const { liquidations } = useVaultLiquidations(Number(vid))
   const { positionType, squeethAmount } = usePositions()
+  const { getApproved, approve } = useERC721(nftManager)
 
   const squeethBal = useTokenBalance(wSqueeth, 20, WSQUEETH_DECIMALS)
 
@@ -249,6 +257,7 @@ const Component: React.FC = () => {
   const [action, setAction] = useState(VaultAction.ADD_COLLATERAL)
   const [txLoading, setTxLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
+  const [uniTokenToDeposit, setUniTokenToDeposit] = useState(0)
 
   const { data, loading } = useQuery<{ vault: Vault_vault }>(VAULT_QUERY, {
     client: squeethClient[networkId],
@@ -262,22 +271,19 @@ const Component: React.FC = () => {
   const updateVault = () => {
     if (!_vault || !connected) return
 
-    setVault({
-      id: Number(_vault.id),
-      NFTCollateralId: _vault.NftCollateralId,
-      collateralAmount: toTokenAmount(new BigNumber(_vault.collateralAmount), 18),
-      shortAmount: toTokenAmount(new BigNumber(_vault.shortAmount), WSQUEETH_DECIMALS),
-      operator: _vault.operator,
+    getVault(Number(_vault.id)).then((v) => {
+      setVault(v)
+      console.log(v)
+      if (!v) return
+      getCollatRatioAndLiqPrice(new BigNumber(v?.collateralAmount), new BigNumber(v?.shortAmount)).then(
+        ({ collateralPercent, liquidationPrice }) => {
+          setExistingCollatPercent(collateralPercent)
+          setCollatPercent(collateralPercent)
+          setExistingLiqPrice(new BigNumber(liquidationPrice))
+          setPageLoading(false)
+        },
+      )
     })
-
-    getCollatRatioAndLiqPrice(new BigNumber(_vault.collateralAmount), new BigNumber(_vault.shortAmount)).then(
-      ({ collateralPercent, liquidationPrice }) => {
-        setExistingCollatPercent(collateralPercent)
-        setCollatPercent(collateralPercent)
-        setExistingLiqPrice(new BigNumber(liquidationPrice))
-        setPageLoading(false)
-      },
-    )
   }
 
   useEffect(() => {
@@ -348,6 +354,17 @@ const Component: React.FC = () => {
     setMaxToMint(diff)
   }
 
+  const updateUniLPTokenInput = async (input: number) => {
+    setUniTokenToDeposit(input)
+    if (!input) return
+    const approvedAddress: string = await getApproved(input)
+    if (controller.toLowerCase() === (approvedAddress || '').toLowerCase()) {
+      setAction(VaultAction.DEPOSIT_UNI_POSITION)
+    } else {
+      setAction(VaultAction.APPROVE_UNI_POSITION)
+    }
+  }
+
   useEffect(() => {
     if (vault) getMaxToMint()
   }, [vault, vault?.collateralAmount])
@@ -398,6 +415,48 @@ const Component: React.FC = () => {
     try {
       await burnAndRedeem(vault.id, sAmount.abs(), new BigNumber(0))
       updateVault()
+    } catch (e) {
+      console.log(e)
+    }
+    setTxLoading(false)
+  }
+
+  const depositUniLPToken = async (tokenId: number) => {
+    if (!vault) return
+
+    setTxLoading(true)
+    try {
+      await depositUniPositionToken(vault.id, tokenId)
+      setAction(VaultAction.WITHDRAW_UNI_POSITION)
+      updateVault()
+    } catch (e) {
+      console.log(e)
+    }
+    setTxLoading(false)
+  }
+
+  const withdrawUniLPToken = async () => {
+    if (!vault) return
+
+    setTxLoading(true)
+    setAction(VaultAction.WITHDRAW_UNI_POSITION)
+    try {
+      await withdrawUniPositionToken(vault.id)
+      updateVault()
+      setAction(VaultAction.DEPOSIT_UNI_POSITION)
+    } catch (e) {
+      console.log(e)
+    }
+    setTxLoading(false)
+  }
+
+  const approveUniLPToken = async (tokenId: number) => {
+    if (!vault) return
+
+    setTxLoading(true)
+    try {
+      await approve(controller, tokenId)
+      setAction(VaultAction.DEPOSIT_UNI_POSITION)
     } catch (e) {
       console.log(e)
     }
@@ -461,6 +520,8 @@ const Component: React.FC = () => {
   const shortDebt = useMemo(() => {
     return positionType === PositionType.SHORT ? squeethAmount : new BigNumber(0)
   }, [positionType, squeethAmount])
+
+  const isLPDeposited = Number(vault?.NFTCollateralId) !== 0
 
   return (
     <div>
@@ -722,7 +783,7 @@ const Component: React.FC = () => {
                         : updateShort(squeethBal.negated().toString())
                     }
                     variant="text"
-                    // style={{ marginLeft: '250px' }}
+                  // style={{ marginLeft: '250px' }}
                   >
                     Max
                   </LinkButton>
@@ -737,13 +798,12 @@ const Component: React.FC = () => {
                   hint={
                     !!adjustAmountError
                       ? adjustAmountError
-                      : `Balance ${
-                          squeethBal?.isGreaterThan(0) &&
-                          positionType === PositionType.LONG &&
-                          squeethBal.minus(squeethAmount).isGreaterThan(0)
-                            ? squeethBal.minus(squeethAmount).toFixed(8)
-                            : squeethBal.toFixed(8)
-                        } oSQTH`
+                      : `Balance ${squeethBal?.isGreaterThan(0) &&
+                        positionType === PositionType.LONG &&
+                        squeethBal.minus(squeethAmount).isGreaterThan(0)
+                        ? squeethBal.minus(squeethAmount).toFixed(8)
+                        : squeethBal.toFixed(8)
+                      } oSQTH`
                   }
                   // hint={!!adjustAmountError ? adjustAmountError : `Balance ${squeethBal.toFixed(6)} oSQTH`}
                   error={!!adjustAmountError}
@@ -807,6 +867,82 @@ const Component: React.FC = () => {
                     'Mint'
                   )}
                 </AddButton>
+              </div>
+            </div>
+          </div>
+          <div className={classes.manager}>
+            <div className={classes.managerItem}>
+              <div className={classes.managerItemHeader}>
+                <div style={{ marginLeft: '16px', width: '40px', height: '40px' }}>
+                  <Image src={ethLogo} alt="logo" width={40} height={40} />
+                </div>
+                <Typography className={classes.managerItemTitle} variant="h6">
+                  Manage LP token
+                </Typography>
+              </div>
+              <div style={{ margin: 'auto', width: '300px', marginTop: '24px' }}>
+                <TextField
+                  size="small"
+                  value={isLPDeposited ? vault?.NFTCollateralId : uniTokenToDeposit}
+                  type="number"
+                  style={{ width: 300 }}
+                  onChange={(event) => updateUniLPTokenInput(Number(event.target.value))}
+                  id="filled-basic"
+                  label="Uni LP token"
+                  variant="outlined"
+                  disabled={isLPDeposited}
+                />
+              </div>
+              {/* <div className={classes.txDetails}>
+                <TradeInfoItem
+                  label="New liquidation price"
+                  value={isCollatAction ? (newLiqPrice || 0).toFixed(2) : '0'}
+                  frontUnit="$"
+                />
+              </div> */}
+              <div className={classes.managerActions} style={{ marginTop: '16px' }}>
+                {isLPDeposited ? (
+                  <RemoveButton
+                    className={classes.actionBtn}
+                    size="small"
+                    disabled={txLoading}
+                    onClick={() => withdrawUniLPToken()}
+                  >
+                    {action === VaultAction.WITHDRAW_UNI_POSITION && txLoading ? (
+                      <CircularProgress color="primary" size="1rem" />
+                    ) : (
+                      'Remove'
+                    )}
+                  </RemoveButton>
+                ) : null}
+                {!isLPDeposited && action === VaultAction.APPROVE_UNI_POSITION ? (
+                  <AddButton
+                    onClick={() => approveUniLPToken(uniTokenToDeposit)}
+                    className={classes.actionBtn}
+                    size="small"
+                    disabled={action !== VaultAction.APPROVE_UNI_POSITION || txLoading}
+                  >
+                    {action === VaultAction.APPROVE_UNI_POSITION && txLoading ? (
+                      <CircularProgress color="primary" size="1rem" />
+                    ) : (
+                      'Approve'
+                    )}
+                  </AddButton>
+                ) : null}
+                {!isLPDeposited && action === VaultAction.DEPOSIT_UNI_POSITION ? (
+                  <AddButton
+                    onClick={() => depositUniLPToken(uniTokenToDeposit)}
+                    className={classes.actionBtn}
+                    size="small"
+                    disabled={action !== VaultAction.DEPOSIT_UNI_POSITION || txLoading}
+                  >
+                    {action === VaultAction.DEPOSIT_UNI_POSITION && txLoading ? (
+                      <CircularProgress color="primary" size="1rem" />
+                    ) : (
+                      'Deposit'
+                    )}
+                  </AddButton>
+                ) : null}
               </div>
             </div>
           </div>
