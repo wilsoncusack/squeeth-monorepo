@@ -783,7 +783,7 @@ const Component: React.FC = () => {
                         : updateShort(squeethBal.negated().toString())
                     }
                     variant="text"
-                  // style={{ marginLeft: '250px' }}
+                    // style={{ marginLeft: '250px' }}
                   >
                     Max
                   </LinkButton>
@@ -798,12 +798,13 @@ const Component: React.FC = () => {
                   hint={
                     !!adjustAmountError
                       ? adjustAmountError
-                      : `Balance ${squeethBal?.isGreaterThan(0) &&
-                        positionType === PositionType.LONG &&
-                        squeethBal.minus(squeethAmount).isGreaterThan(0)
-                        ? squeethBal.minus(squeethAmount).toFixed(8)
-                        : squeethBal.toFixed(8)
-                      } oSQTH`
+                      : `Balance ${
+                          squeethBal?.isGreaterThan(0) &&
+                          positionType === PositionType.LONG &&
+                          squeethBal.minus(squeethAmount).isGreaterThan(0)
+                            ? squeethBal.minus(squeethAmount).toFixed(8)
+                            : squeethBal.toFixed(8)
+                        } oSQTH`
                   }
                   // hint={!!adjustAmountError ? adjustAmountError : `Balance ${squeethBal.toFixed(6)} oSQTH`}
                   error={!!adjustAmountError}
