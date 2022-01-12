@@ -28,7 +28,7 @@ export const useETHPrice = (refetchIntervalSec = 20): BigNumber => {
     updatePrice()
   }, [])
 
-  useInterval(updatePrice, refetchIntervalSec * 1000)
+  useInterval(updatePrice, refetchIntervalSec * 5000)
 
   return price
 }

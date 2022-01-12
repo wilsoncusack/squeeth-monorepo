@@ -44,7 +44,7 @@ export const useTokenBalance = (token: string, refetchIntervalSec = 20, decimals
     setBalance(balance)
   }, [address, token, getBalance])
 
-  useInterval(updateBalance, refetchIntervalSec * 1000)
+  useInterval(updateBalance, refetchIntervalSec * 15000)
 
   return balance
 }

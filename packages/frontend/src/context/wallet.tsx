@@ -12,11 +12,6 @@ import { Networks } from '../types'
 
 const useAlchemy = process.env.NEXT_PUBLIC_USE_ALCHEMY
 const defaultWeb3 = useAlchemy ? new Web3(`https://eth-mainnet.alchemyapi.io/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`) : new Web3(`https://mainnet.infura.io/v3/${process.env.NEXT_PUBLIC_INFURA_API_KEY}`)
-if (useAlchemy) {
-  console.log("using alchemy")
-} else {
-  console.log("not using alchemy")
-}
 
 type WalletType = {
   web3: Web3
@@ -122,7 +117,7 @@ const WalletProvider: React.FC = ({ children }) => {
     getBalance()
   }, [address])
 
-  useInterval(getBalance, 20000)
+  useInterval(getBalance, 30000)
 
   useEffect(() => {
     const onNetworkChange = (updateNetwork: number) => {
@@ -164,6 +159,7 @@ const WalletProvider: React.FC = ({ children }) => {
       dappId: process.env.NEXT_PUBLIC_BLOCKNATIVE_DAPP_ID,
       networkId: networkId,
       darkMode: true,
+      blockPollingInterval: 30000,
       subscriptions: {
         address: setAddr,
         network: onNetworkChange,
